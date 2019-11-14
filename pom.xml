@@ -58,12 +58,6 @@
         </profile>
     </profiles>
     <dependencies>
-<!--        <dependency>-->
-<!--            <groupId>javax.xml.bind</groupId>-->
-<!--            <artifactId>jaxb-api</artifactId>-->
-<!--            <version>2.1</version>-->
-<!--        </dependency>-->
-        <!-- https://mvnrepository.com/artifact/org.apache.beam/beam-sdks-java-io-jdbc -->
         <dependency>
             <groupId>org.apache.beam</groupId>
             <artifactId>beam-sdks-java-io-jdbc</artifactId>
@@ -117,11 +111,11 @@
             <artifactId>postgresql</artifactId>
             <version>42.2.5</version>
         </dependency>
-<!--        <dependency>-->
-<!--            <groupId>com.google.cloud</groupId>-->
-<!--            <artifactId>google-cloud-pubsub</artifactId>-->
-<!--            <version>1.98.0</version>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20160810</version>
+        </dependency>
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
@@ -132,14 +126,7 @@
             <artifactId>google-auth-library-oauth2-http</artifactId>
             <version>0.16.2</version>
         </dependency>
-
-<!--        <dependency>-->
-<!--            <groupId>com.google.api</groupId>-->
-<!--            <artifactId>gax</artifactId>-->
-<!--            <version>0.6.1</version>-->
-<!--        </dependency>-->
-
-    </dependencies>
+ </dependencies>
 
     <build>
         <pluginManagement>
