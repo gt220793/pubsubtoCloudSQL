@@ -1,5 +1,9 @@
 package com.journaldev.bean;
 
+import com.domain.Address;
+import com.domain.Customer;
+import com.domain.Order;
+import com.google.api.services.pubsub.Pubsub;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.Storage;
@@ -7,18 +11,23 @@ import com.google.cloud.storage.StorageOptions;
 import com.google.gson.JsonObject;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.gcp.pubsub.PubsubIO;
+import org.apache.beam.sdk.io.gcp.pubsub.PubsubMessage;
 import org.apache.beam.sdk.io.jdbc.JdbcIO;
 import org.apache.beam.sdk.options.PipelineOptionsFactory;
-import org.apache.beam.sdk.transforms.Create;
-import org.apache.beam.sdk.transforms.DoFn;
-import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.*;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.PCollectionView;
+import org.apache.beam.sdk.values.PDone;
 import org.codehaus.jackson.map.ObjectMapper;
+import org.joda.time.Duration;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
 import java.sql.PreparedStatement;
 
 public class PipeLineTest {
@@ -58,55 +67,101 @@ public class PipeLineTest {
                 .build()
                 .getService();
         Blob blob = storage.get(BUCKET_NAME, FILE_NAME);
-        String json = new String(blob.getContent());
+        //String json = new String(blob.getContent());
 
+        ObjectMapper mapper = new ObjectMapper();
+        Customer customerObject = new Customer(100, "abcd", 23, "M", false);
+        Address address = new Address("Unit-2", "Belgrave St", "NSW", "Sydney", "Aus", 2027);
+        Order order = new Order(101, customerObject, 12.0, "Not delivered", address, address, false);
+
+        String json = mapper.writeValueAsString(order);
+        json = json.trim().replaceAll("\n", "");
         //Persisting JSON file on pubsub topic
         Pipeline pipeline = Pipeline.create(PipelineOptionsFactory.fromArgs(args).withValidation().create());
-        PCollection<String> output = pipeline.apply("Read JSON file", Create.of(new String(json)));
-       /* PCollection<String> output = input.apply("Read the file", ParDo.of(new DoFn<String, String>() {
-            private static final long serialVersionUID = 1L;
+        PCollection<String> output = pipeline.apply("Read JSON file", Create.<String>of(json));
 
-            *//**
-             * Process element.
-             *
-             * @param context
-             *            the context
-             *//*
+        /*output.apply(ParDo.of(new DoFn<String, String>() {
+
             @ProcessElement
-            public void processElement(ProcessContext context) {
-                LOGGER.debug("#Processing record : {}", context.element());
-                context.output(context.element());
+            public void processElement(ProcessContext pc) {
+                System.out.println("PCollection JSON : " + pc.element());
             }
+
         }));*/
-        output.apply(PubsubIO.writeStrings().to(OUTPUT_TOPIC_NAME));
 
-        //Persisting that json file from pubsub topic to PostgresSQL
-        final PCollection<String> output_json = pipeline.apply(PubsubIO.readStrings().fromTopic(OUTPUT_TOPIC_NAME));
-        output_json.apply(JdbcIO.<String>write()
+
+        output.apply(PubsubIO.writeStrings().to(OUTPUT_TOPIC_NAME).withIdAttribute("UID-101"));
+
+
+        final PCollection<String> output_json = pipeline.apply(PubsubIO.readStrings()
+//                .fromTopic(OUTPUT_TOPIC_NAME));
+                .fromSubscription("projects/" + PROJECT_ID + "/subscriptions/myJSON").withIdAttribute("UID-101"));
+
+//        PCollection<PubsubMessage> messages = pipeline.apply(PubsubIO.readMessagesWithAttributes()
+//                .fromSubscription("projects/" + PROJECT_ID + "/subscriptions/myJSON"));
+
+
+        JdbcIO.Write<String> configuredWrite = JdbcIO.<String>write()
                 .withDataSourceConfiguration(JdbcIO.DataSourceConfiguration
-                .create("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres")
-                        .withUsername("postgres").withPassword("postgres"))
-                .withStatement("INSERT INTO employee (emp_id, emp_name) VALUES (?,?)")
+                        .create("org.postgresql.Driver", "jdbc:postgresql://localhost:5432/postgres")
+                        .withUsername("postgres").withPassword("postgres"));
+
+        output_json.apply(configuredWrite
+                .withStatement("INSERT INTO address (line1, line2, state, district, country, pincode) VALUES (?,?,?,?,?,?)")
+                //.withStatement("")
                 .withPreparedStatementSetter(new JdbcIO.PreparedStatementSetter<String>() {
-                 private static final long serialVersionUID = 1L;
-                 public void setParameters(String element, PreparedStatement preparedStatement) throws Exception {
+                                                 private static final long serialVersionUID = 1L;
+
+                                                 public void setParameters(String element, PreparedStatement preparedStatement) throws Exception {
                                                      logger.info("DB Opertaion json data: " + element);
-                     ObjectMapper mapper = new ObjectMapper();
-
-                     //JSON file to Java object
-                     //Staff staff = mapper.readValue(element, Staff.class);
-
-                    JSONObject jsonObject = new JSONObject(element);
-                    //String target = jsonObject.getString("target");
-                    JSONArray columnValue = jsonObject.getJSONArray("values");
-                    System.out.println(element);
-                    preparedStatement.setInt(1, Integer.parseInt(columnValue.get(0).toString()));
-                    preparedStatement.setString(2, columnValue.get(1).toString());
+                                                     JSONObject jsonObject = new JSONObject(element);
+                                                     JSONObject object_address = (JSONObject) jsonObject.get("shippingAddress");
+                                                     preparedStatement.setString(1, object_address.get("line1").toString());
+                                                     preparedStatement.setString(2, object_address.get("line2").toString());
+                                                     preparedStatement.setString(3, object_address.get("state").toString());
+                                                     preparedStatement.setString(4, object_address.get("district").toString());
+                                                     preparedStatement.setString(5, object_address.get("country").toString());
+                                                     preparedStatement.setString(6, object_address.get("pinCode").toString());
                                                  }
                                              }
                 ));
-        pipeline.run();
+        output_json.apply(configuredWrite.withStatement("INSERT INTO customer (id, name, age, gender) VALUES(?,?,?,?)")
+                .withPreparedStatementSetter(new JdbcIO.PreparedStatementSetter<String>() {
+                                                 private static final long serialVersionUID = 1L;
+
+                                                 public void setParameters(String element, PreparedStatement preparedStatement) throws Exception {
+                                                     logger.info("DB Opertaion json data: " + element);
+                                                     JSONObject jsonObject = new JSONObject(element);
+                                                     JSONObject object_customer = (JSONObject) jsonObject.get("customer");
+                                                     preparedStatement.setInt(1, Integer.parseInt(object_customer.get("id").toString()));
+                                                     preparedStatement.setString(2, object_customer.get("name").toString());
+                                                     preparedStatement.setInt(3, Integer.parseInt(object_customer.get("age").toString()));
+                                                     preparedStatement.setString(4, object_customer.get("gender").toString());
+                                                 }
+                                             }
+                ));
+        output_json.apply(configuredWrite.withStatement("INSERT INTO public.order (id, customerid, ordertotal, status, isgift) VALUES(?,?,?,?,?)")
+                .withPreparedStatementSetter(new JdbcIO.PreparedStatementSetter<String>() {
+                                                 private static final long serialVersionUID = 1L;
+
+                                                 public void setParameters(String element, PreparedStatement preparedStatement) throws Exception {
+                                                     logger.info("DB Opertaion json data: " + element);
+                                                     //JSON file to Java object
+                                                     //Staff staff = mapper.readValue(element, Staff.class);
+                                                     JSONObject jsonObject = new JSONObject(element);
+                                                     preparedStatement.setInt(1, Integer.parseInt(jsonObject.get("id").toString()));
+                                                     preparedStatement.setInt(2, 101);
+                                                     preparedStatement.setDouble(3, (Double) jsonObject.get("orderTotal"));
+                                                     preparedStatement.setString(4, jsonObject.get("status").toString());
+                                                     preparedStatement.setBoolean(5, (Boolean) jsonObject.get("gift"));
+                                                 }
+                                             }
+                ));
+
+        pipeline.run().waitUntilFinish(Duration.standardSeconds(60));
         LOGGER.debug("All done!!");
+        System.exit(0);
+
     }
 }
 
